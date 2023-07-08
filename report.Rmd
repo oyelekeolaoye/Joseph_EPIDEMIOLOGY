@@ -13,14 +13,31 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = F)
 
 library(tidyverse)
 library(readstata13)
 library(haven)
 
-grip_strength <- read_dta("data/Male grip strength.dta")
+grip_strength <- read_dta("data/Male grip strength12_v2.dta")
 diabetes <- read.dta13("data/diabetesmodel12_corrected.dta")
 ```
 
-
+# Question 1
+## Exploratory Data Analysis
+```{r, echo = F}
+grip_strength_df <- grip_strength %>%
+  mutate(BMI = WEIGHT/(HEIGHT/100)^2,
+         BMI_category = case_when(BMI < 18.499 ~ "Underweight",
+                                  BMI >=18.5 & BMI < 25.0 ~ "Normal",
+                                  BMI >= 25 & BMI < 30 ~ "Overweight",
+                                  BMI >=30 ~ "Obese"))
+```
+### Figure 1 - Count of each BMI category for our sample
+```{r, echo = F}
+ggplot(grip_strength_df, aes(x = BMI_category)) +
+  geom_bar() +
+  labs(x = "BMI Category", y = "Number of students", title = "BMI categories for our sample of 87 first year male students") +
+  geom_text(stat = "count", aes(label = stat(count), y = stat(count)), vjust = -0.5) +
+  theme_minimal()
+```
