@@ -1,0 +1,26 @@
+---
+title: "Epidemiology"
+author: "Joseph C. Amoforitse; 2826822A@student.gla.ac.uk"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    theme: paper
+    number_sections: yes
+  pdf_document:
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(readstata13)
+library(haven)
+
+grip_strength <- read_dta("data/Male grip strength.dta")
+diabetes <- read.dta13("data/diabetesmodel12_corrected.dta")
+```
+
+
