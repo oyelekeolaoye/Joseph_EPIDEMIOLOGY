@@ -7,24 +7,30 @@ output:
     toc: yes
     toc_float: yes
     theme: paper
-    number_sections: yes
+    number_sections: no
   pdf_document:
     toc: yes
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = F)
+knitr::opts_chunk$set(echo = F, warning = F)
 
 library(tidyverse)
 library(readstata13)
+library(reshape2)
 library(haven)
+library(PerformanceAnalytics)
+library(corrplot)
+library(usdm)
 
 grip_strength <- read_dta("data/Male grip strength12_v2.dta")
 diabetes <- read.dta13("data/diabetesmodel12_corrected.dta")
 ```
 
 # Question 1
+
 ## Exploratory Data Analysis
+
 ```{r, echo = F}
 grip_strength_df <- grip_strength %>%
   mutate(BMI = WEIGHT/(HEIGHT/100)^2,
@@ -33,11 +39,119 @@ grip_strength_df <- grip_strength %>%
                                   BMI >= 25 & BMI < 30 ~ "Overweight",
                                   BMI >=30 ~ "Obese"))
 ```
-### Figure 1 - Count of each BMI category for our sample
+
+### 1A - Figure 1: Count of each BMI category for our sample
+
 ```{r, echo = F}
 ggplot(grip_strength_df, aes(x = BMI_category)) +
   geom_bar() +
   labs(x = "BMI Category", y = "Number of students", title = "BMI categories for our sample of 87 first year male students") +
   geom_text(stat = "count", aes(label = stat(count), y = stat(count)), vjust = -0.5) +
   theme_minimal()
+```
+
+### Figure 2 - A plot of correlation between pairs of variables in our dataset
+
+```{r, echo=F}
+grip_strength_df %>%
+  select(-c(BMI_category,ID)) %>%
+  cor() %>%
+  round(2) %>%
+  corrplot(type = "upper", order = "hclust", tl.col = "black", tl.srt = 45)
+```
+
+### Regression model
+
+#### Variable selection
+
+I used the correlation plot shown above to make a selection of variables to include in the initial regression model based on the strength of relationship between the independent variables and the outcome variable (grip strength). The variables selected are:
+
+1.  Forearm circumference (mm) with a correlation of 0.62
+2.  Hand length (cm) with a correlation of 0.28
+3.  Hand width (cm) with a correlation of 0.23
+4.  Forearm skinfold (mm) with a correlation of 0.15
+
+I have excluded other variables due to either low correlation with the outcome variable or a medium-high correlation with variables already selected. For example, Bicep circumference has 0.85 with Forecarm circumference and has been excluded to avoid multicollinearity. I decided the order for which to enter the variables in the model based on the strength of correlation.
+
+```{r, echo=F}
+model1 <- lm(data = grip_strength_df, formula = Grip ~ Fcirc + Hlen + Hwid + WEIGHT)
+```
+
+#### Table 1 - Initial Regression Model
+
+| Variable               | Coefficient |    Std.Error    | t-Statistic | Prob. | Significance |
+|:-----------|:----------:|:----------:|:----------:|:----------:|:----------:|
+| **Intercept**          |   -58.92    |      15.09      |    -3.90    | 0.00  |      \*      |
+| Forearm circumference  |    2.74     |      0.39       |    7.03     | 0.00  |      \*      |
+| Hand length            |    1.39     |      0.65       |    2.11     | 0.04  |      \*      |
+| Hand width             |    0.56     |      0.40       |    1.37     | 0.17  |              |
+| Weight                 |    0.01     |      0.08       |    0.11     | 0.91  |              |
+| **R-squared**          |   0.4465    | **F-statistic** |    16.54    |       |              |
+| **Adjusted R-squared** |   0.4195    |   **P-value**   |    0.00     |       |              |
+
+Considering that weight and hand width seem to not make any substantial contribution to our model in the presence of the other variables we included, we can drop them to get a more parsimonious model.
+
+```{r, echo=F}
+model2 <- lm(data = grip_strength_df, formula = Grip ~ Fcirc + Hlen)
+```
+
+### 1A - Regression model
+
+#### Table 2 - Final Regression Model
+
+| Variable               | Coefficient |    Std.Error    | t-Statistic | Prob. | Significance |
+|:-----------|:----------:|:----------:|:----------:|:----------:|:----------:|
+| **Intercept**          |   -57.74    |      15.09      |    -3.90    | 0.00  |      \*      |
+| Forearm circumference  |    2.79     |      0.39       |    7.03     | 0.00  |      \*      |
+| Hand length            |    1.60     |      0.65       |    2.11     | 0.04  |      \*      |
+| **R-squared**          |   0.4323    | **F-statistic** |    31.98    |       |              |
+| **Adjusted R-squared** |   0.4188    |   **P-value**   |    0.00     |       |              |
+
+### 1B - INTERPRETING THE MODEL COEFFICIENTS
+
+Our model is defined as:
+
+$$
+gripstrength_i = -57.74 + (2.79 forearmcircumference_i) + (1.60hand length_i) - (1.1)
+$$
+
+Both coefficients are positive and statistically significant at 0.05 confidence level which implies that higher forearm circumference yields a higher grip strength and a longer hand results in a high grip strength.
+
+-   **Forearm circumference** (b = 2.79): This value indicates that if the effect of hand length is held constant, a **1mm** increase in forearm circumference will yield a **2.79kg** extra grip strength.
+
+-   **Hand length** (b = 1.60): This indicates that a **1cm** increase in hand length will yield **1.60kg** extra grip strength. This is true if the effect of forearm circumference is held constant.
+
+We can use the equation 1.1 above to predict the grip strength of any male student if we have measurements of their forearm circumference and hand length by plugging the values respectively into the equation.
+
+For example - if we consider Emeka with forearm circumference of **40.5cm** and hand length of **32.8cm**. His grip strength would = $-57.74 + (2.79*40.5) + (1.60*32.8) = 107.74kg$
+
+
+### 1C - ASSUMPTIONS OF THE MODEL
+1. Multicollinearity: The multiple regression method assumes no strong correlation between the independent variables because this would impact our ability to interpret the model coefficients correctly. We have verified this with the correlation plot in Figure 2.
+
+2. Linearity and homoscedasticity: Linear regression assumes that the error is constant along the value of the dependent variable. We can see that this assumption is met with the plot of fitted values versus residuals below. We can observe how the points are evenly dispersed around zero and that there is no non-linear pattern.
+
+3. Normality: The Q-Q plot below does not show significant deviation of the observed residuals from normality.
+
+Given that these assumptions are met, we can safely conclude that the model appears to be accurate for our sample and generalizable to the population. Forearm circumference and hand length are important in predicting grip strength.
+
+#### Figure 3 - Plots of model output (Grip Strength = ForearmCircumference + HandLength + Error)
+
+```{r, echo = F}
+plot(model2)
+```
+# Question 2
+## 1A - Exploratory Data Analysis
+### Age and Diabetes
+```{r, echo=F}
+diabetes <- diabetes %>%
+  mutate_if(is.character, as.factor) %>%
+  mutate(Sex = recode(Sex, `1` = "Female", `2` = "Male"))
+```
+
+```{r, echo=F}
+ggplot(companies_df, aes(x = factor(DummyIgbo), y = AssetTurnover, color = factor(DummyIgbo))) +
+  geom_jitter(width = 0.2, height = 0) +
+  labs(x = "Board Dominance (Igbo)", y = "AssetTurnover") +
+  theme_minimal() + theme(legend.position = "none")
 ```
