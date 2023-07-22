@@ -15,16 +15,18 @@ output:
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = F, warning = F)
 
-library(tidyverse)
-library(readstata13)
-library(reshape2)
-library(haven)
-library(PerformanceAnalytics)
-library(corrplot)
-library(usdm)
+pacman::p_load("tidyverse", "readstata13", "reshape2", "haven", "PerformanceAnalytics", "corrplot", "usdm", "car", "mlogit", "ggcorrplot",
+               "gridExtra", "pander")
 
 grip_strength <- read_dta("data/Male grip strength12_v2.dta")
 diabetes <- read.dta13("data/diabetesmodel12_corrected.dta")
+
+diabetes <- diabetes %>%
+  mutate(Sex = dplyr::recode(Sex, `1` = "Female", `2` = "Male")) %>%
+  mutate_if(is.character, as.factor) 
+
+diabetes_female <- diabetes %>% filter(Sex == "Female")
+diabetes_male <- diabetes %>% filter(Sex == "Male")
 ```
 
 # Question 1
@@ -40,7 +42,42 @@ grip_strength_df <- grip_strength %>%
                                   BMI >=30 ~ "Obese"))
 ```
 
-### 1A - Figure 1: Count of each BMI category for our sample
+### 1A
+
+#### 5-number summary of BMI including the mean
+
+```{r, echo = FALSE}
+summary_data <- summary(grip_strength_df$BMI)
+
+
+# Create a data frame to store the 5-number summary
+# Create a one-row data frame to store the 5-number summary
+summary_df <- data.frame(
+  Statistic = c("Minimum", "1st Quartile", "Median", "Mean", "3rd Quartile", "Maximum"),
+  Value = t(summary_data)  # Transpose the summary_data to convert it to a row
+) %>%
+  select(Statistic, Value.Freq) %>% rename(Value = Value.Freq)
+
+knitr::kable(summary_df,
+             format = "markdown")
+```
+
+**Commentary:** Our data is fairly symmetric with the median and mean very close together indicating that there is not many extreme values in our sample. The maximum BMI in our sample is 28.7 (kg/m2) which mean we do not have any student who is obese in our sample (BMI greater than or equal to 30)
+
+#### Figure 1 - Histogram of BMI
+
+```{r, echo=FALSE}
+ggplot(grip_strength_df, aes(x = BMI)) +
+  geom_histogram(binwidth = 1, color = "white", fill = "steelblue") +
+  labs(title = "Histogram of BMI",
+       x = "BMI (kg/m2)",
+       y = "Frequency") +
+  theme_minimal()
+```
+
+[**Commentary:**]{.underline} The histogram supports the observation I noted above that there are not many extreme values in our sample and we have only one outlying student whose BMI is close to 30.
+
+#### Figure 1 - Count of each BMI category for our sample
 
 ```{r, echo = F}
 ggplot(grip_strength_df, aes(x = BMI_category)) +
@@ -50,28 +87,31 @@ ggplot(grip_strength_df, aes(x = BMI_category)) +
   theme_minimal()
 ```
 
-### Figure 2 - A plot of correlation between pairs of variables in our dataset
+[**Commentary:**]{.underline} Most students in our sample (76) have a normal BMI and four (4) of them are overweight with the remaining seven (7) being classified as overweight. As I mentioned earlier, no student in our sample is obese.
+
+### Figure 2 - Correlation matrix between pairs of variables in our dataset
 
 ```{r, echo=F}
-grip_strength_df %>%
-  select(-c(BMI_category,ID)) %>%
-  cor() %>%
-  round(2) %>%
-  corrplot(type = "upper", order = "hclust", tl.col = "black", tl.srt = 45)
+cor_data <- grip_strength_df %>%
+  select(-c(BMI_category,ID)) 
+
+ggcorrplot(cor(cor_data), lab = TRUE)
 ```
+
+[**Commentary:**]{.underline} Some of the variables in our dataset (predictors of grip strength) are **moderately** correlated with each other with weight and BMI being **strongly** correlated with a correlation score of 0.74. Forearm circumference and bicep circumference are also highly correlated (0.85). The implication of this is that to avoid the problem of multicollinearity in the linear regression model I aim to develop in the next section, I will only select one of the other of those variables that are highly correlated with each other.
 
 ### Regression model
 
 #### Variable selection
 
-I used the correlation plot shown above to make a selection of variables to include in the initial regression model based on the strength of relationship between the independent variables and the outcome variable (grip strength). The variables selected are:
+I used the correlation matrix shown above to make a selection of variables to include in the initial regression model based on the strength of relationship between the independent variables and the outcome variable (grip strength). The variables selected are:
 
 1.  Forearm circumference (mm) with a correlation of 0.62
 2.  Hand length (cm) with a correlation of 0.28
 3.  Hand width (cm) with a correlation of 0.23
 4.  Forearm skinfold (mm) with a correlation of 0.15
 
-I have excluded other variables due to either low correlation with the outcome variable or a medium-high correlation with variables already selected. For example, Bicep circumference has 0.85 with Forecarm circumference and has been excluded to avoid multicollinearity. I decided the order for which to enter the variables in the model based on the strength of correlation.
+I have excluded other variables due to either low correlation with the outcome variable or a medium-high correlation with variables already selected. For example, Bicep circumference has 0.85 with forecarm circumference and has been excluded to avoid multicollinearity. I decided the order for which to enter the variables in the model based on the strength of correlation.
 
 ```{r, echo=F}
 model1 <- lm(data = grip_strength_df, formula = Grip ~ Fcirc + Hlen + Hwid + WEIGHT)
@@ -95,19 +135,17 @@ Considering that weight and hand width seem to not make any substantial contribu
 model2 <- lm(data = grip_strength_df, formula = Grip ~ Fcirc + Hlen)
 ```
 
-### 1A - Regression model
-
 #### Table 2 - Final Regression Model
 
-| Variable               | Coefficient |    Std.Error    | t-Statistic | Prob. | Significance |
+| Variable               | Coefficient |    Std.Error    | t-Statistic |     Prob.     | 95% confidence interval |
 |:-----------|:----------:|:----------:|:----------:|:----------:|:----------:|
-| **Intercept**          |   -57.74    |      15.09      |    -3.90    | 0.00  |      \*      |
-| Forearm circumference  |    2.79     |      0.39       |    7.03     | 0.00  |      \*      |
-| Hand length            |    1.60     |      0.65       |    2.11     | 0.04  |      \*      |
-| **R-squared**          |   0.4323    | **F-statistic** |    31.98    |       |              |
-| **Adjusted R-squared** |   0.4188    |   **P-value**   |    0.00     |       |              |
+| **Intercept**          |   -57.74    |      15.09      |    -3.90    |   0.000208    |    [-87.40, -28.13]     |
+| Forearm circumference  |    2.79     |      0.39       |    7.03     | 0.00000000019 |      [2.03, 3.56]       |
+| Hand length            |    1.60     |      0.65       |    2.11     |   0.011880    |      [0.36, 2.83]       |
+| **R-squared**          |   0.4323    | **F-statistic** |    31.98    |               |                         |
+| **Adjusted R-squared** |   0.4188    |   **P-value**   |    0.00     |               |                         |
 
-### 1B - INTERPRETING THE MODEL COEFFICIENTS
+### 1B - INTERPRETING THE MODEL RESULTS
 
 Our model is defined as:
 
@@ -117,41 +155,284 @@ $$
 
 Both coefficients are positive and statistically significant at 0.05 confidence level which implies that higher forearm circumference yields a higher grip strength and a longer hand results in a high grip strength.
 
--   **Forearm circumference** (b = 2.79): This value indicates that if the effect of hand length is held constant, a **1mm** increase in forearm circumference will yield a **2.79kg** extra grip strength.
+-   **Forearm circumference** (b = 2.79): This value indicates that if the effect of hand length is held constant, a **1mm** increase in forearm circumference will yield a **2.79kg** extra grip strength. The true value of this coefficient in the population is likely to be between 2.03kg and 3.56kg at 95% **confidence level**.
 
--   **Hand length** (b = 1.60): This indicates that a **1cm** increase in hand length will yield **1.60kg** extra grip strength. This is true if the effect of forearm circumference is held constant.
+-   **Hand length** (b = 1.60): This indicates that a **1cm** increase in hand length will yield **1.60kg** extra grip strength. This is true if the effect of forearm circumference is held constant. The true value of this coefficient in the population is likely to be between 0.36cm and 2.84cm at 95% **confidence level**.
 
-We can use the equation 1.1 above to predict the grip strength of any male student if we have measurements of their forearm circumference and hand length by plugging the values respectively into the equation.
+We can use the equation 1.1 above to predict the grip strength of any male student at Glasgow University **(our population)** if we have measurements of their forearm circumference and hand length by plugging the values respectively into the equation.
 
 For example - if we consider Emeka with forearm circumference of **40.5cm** and hand length of **32.8cm**. His grip strength would = $-57.74 + (2.79*40.5) + (1.60*32.8) = 107.74kg$
 
-
 ### 1C - ASSUMPTIONS OF THE MODEL
-1. Multicollinearity: The multiple regression method assumes no strong correlation between the independent variables because this would impact our ability to interpret the model coefficients correctly. We have verified this with the correlation plot in Figure 2.
 
-2. Linearity and homoscedasticity: Linear regression assumes that the error is constant along the value of the dependent variable. We can see that this assumption is met with the plot of fitted values versus residuals below. We can observe how the points are evenly dispersed around zero and that there is no non-linear pattern.
+Some key assumptions of the linear regression model include:
 
-3. Normality: The Q-Q plot below does not show significant deviation of the observed residuals from normality.
+1.  **Multicollinearity**: The multiple regression method assumes no strong correlation between the independent variables because this would impact our ability to interpret the model coefficients correctly. I have used a statistic called Variance Inflation Factor (VIF) to assess multicollinearity in the model. The minimum value of a VIF is 1 and it has no maximum. VIF values are assigned for every predictor in the model. Values less than 10 are not a cause for concern (Andy. F, 2012).
+
+We can see below that our VIF values are very close to 1 and we can therefore conclude that our model is not suffering from multicollinearity and that this assumption is satisfied.
+
+```{r, echo=FALSE}
+vif(model2)
+```
+
+2.  **Linearity and homoscedasticity:** Linear regression assumes that the error is constant along the value of the dependent variable. We can see that both assumptions are met with the plot of fitted values versus residuals below. We can observe how the points are evenly dispersed around zero and that there is no non-linear pattern. **See plot C below.**
+
+3.  **Normality of residuals**: The Q-Q plot and histogram below does not show significant deviation of the observed residuals from normality. **See plots A and B below.**
 
 Given that these assumptions are met, we can safely conclude that the model appears to be accurate for our sample and generalizable to the population. Forearm circumference and hand length are important in predicting grip strength.
 
 #### Figure 3 - Plots of model output (Grip Strength = ForearmCircumference + HandLength + Error)
 
 ```{r, echo = F}
-plot(model2)
-```
-# Question 2
-## 1A - Exploratory Data Analysis
-### Age and Diabetes
-```{r, echo=F}
-diabetes <- diabetes %>%
-  mutate_if(is.character, as.factor) %>%
-  mutate(Sex = recode(Sex, `1` = "Female", `2` = "Male"))
+grip_strength_df$fitted <- model2$fitted.values
+grip_strength_df$studentized.residuals <- rstudent(model2)
+
+histogram <- ggplot(grip_strength_df, aes(studentized.residuals)) +
+  theme(legend.position = "none") +
+  geom_histogram(aes(y = ..density..), colour = "black", fill = "white") +
+  labs(x = "Studentized Residual", y = "Density", title = "Plot A - Fairly normal") +
+  stat_function(fun = dnorm, args = list(mean = mean(grip_strength_df$studentized.residuals, na.rm = TRUE), sd = sd(grip_strength_df$studentized.residuals, na.rm = TRUE)), colour = "red", size = 1)
+
+qqplot.resid <- ggplot(grip_strength_df, aes(sample = studentized.residuals)) +
+  geom_qq() +
+  labs(x = "Theoretical Values",
+       y = "Observed Values",
+       title = "Plot B - Fairly normal")
+
+scatter <- ggplot(grip_strength_df, aes(fitted, studentized.residuals)) +
+  geom_point() +
+  geom_smooth(method = "lm", color = "Blue") +
+  labs(x = "Fitted Values", y = "Studentized Residual", title = "Plot C Linear residuals \n and contant variance")
+
+#------------------------------------
+# Calculate Cook's distance
+cooks_dist <- cooks.distance(model2)
+
+# Create a data frame to store leverage, standardized residuals, and Cook's distance
+plot_data <- data.frame(.hat = hatvalues(model2), .stdresid = rstandard(model2), Cooks_Distance = cooks_dist)
+
+# Set a threshold for labeling outliers (you can adjust this value)
+outlier_threshold <- 4 / nrow(plot_data)
+
+# Identify outlier observations based on Cook's distance threshold
+outlier_indices <- which(cooks_dist > outlier_threshold)
+
+# Create the Residuals vs. Leverage plot using ggplot2 and label outliers
+ggplot(plot_data, aes(x = .hat, y = .stdresid)) +
+  geom_point() +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Plot D\n Residuals vs. Leverage plot\n A few outliers",
+       x = "Leverage",
+       y = "Standardized Residuals") +
+  theme_minimal() +
+  geom_text(data = plot_data[outlier_indices, ],
+            aes(x = .hat, y = .stdresid, label = rownames(plot_data)[outlier_indices]),
+            hjust = -0.2, vjust = 0.5, color = "red", size = 3) -> leverage_plot
+
+#-------------------------------------
+
+grid.arrange(histogram, qqplot.resid, scatter, leverage_plot, ncol = 2)
 ```
 
-```{r, echo=F}
-ggplot(companies_df, aes(x = factor(DummyIgbo), y = AssetTurnover, color = factor(DummyIgbo))) +
-  geom_jitter(width = 0.2, height = 0) +
-  labs(x = "Board Dominance (Igbo)", y = "AssetTurnover") +
-  theme_minimal() + theme(legend.position = "none")
+# Question 2
+
+## 2A - Exploratory Data Analysis
+
+### Summary statistics
+
+```{r, echo=FALSE}
+summary(diabetes)
 ```
+
+### Age and Diabetes
+
+```{r, echo=F}
+ggplot(diabetes, aes(x = diabetes, y = age)) +
+  geom_boxplot() +
+  labs(x = "Diabetes Type", y= "Age (years)", title = "The median age for patients with Type A diabetes\n is higher compared to patients with Type B diabetes")
+```
+
+[**Commentary**]{.underline}: As seen in the boxplots above, the median age for patients with Type A diabetes is higher compared to patients with Type B diabetes.
+
+### BMI and Diabetes
+
+```{r, echo=F}
+ggplot(diabetes, aes(x = diabetes, y = bmi)) +
+  geom_boxplot() +
+  labs(x = "Diabetes", y= "BMI (kg/m2)", title = "Both diabetes groups are not much different with regard to BMI")
+
+ggplot(diabetes, aes(x = bmi, fill = diabetes)) +
+     geom_density(alpha = 0.5) +
+     scale_fill_discrete(name = "Diabetes") +
+  labs(x = "BMI (kg/m2)", y= "Density", title = "Both diabetes groups are not much different with regard to BMI")
+```
+
+### Systolic blood pressure and Diabetes
+
+```{r, echo = F}
+ggplot(diabetes, aes(x = diabetes, y = sbp)) +
+  geom_boxplot() +
+  labs(x = "Diabetes", y= "Systolic Blood Pressure", title = "Type A patients have a slightly higher (median) SBP\n compared to Type B patients")
+
+ggplot(diabetes, aes(x = sbp, fill = diabetes)) +
+     geom_density(alpha = 0.5) +
+     scale_fill_discrete(name = "Diabetes") +
+  labs(x = "Systolic Blood Pressure", y= "Density", title = "Type A patients have a slightly higher (median) SBP\n compared to Type B patients")
+```
+
+## 2B - Logistic regression models for male and female patients
+
+### For male patients
+
+```{r, echo=FALSE}
+initial_male_model <- glm(data = diabetes_male, formula =  diabetes ~ chol + age + ncigs + sbp + bmi + chd, family = "binomial")
+
+final_male_model <- glm(data = diabetes_male, formula =  diabetes ~ age + chd + ncigs + sbp, family = "binomial")
+```
+
+#### Table 1. Logistic regression model result for predicting diabetes type in male patients
+
+| Predictor                                    | Coefficient | Std. Error | Odds Ratio | Confidence Interval | p-value  |
+|------------|------------|------------|------------|------------|------------|
+| (Intercept)                                  | 2.406       | 0.591      | \-         |                     | 0.000047 |
+| **Age (years)**                              | -0.027      | 0.010      | 0.974      | (0.955, 0.992)      | 0.005972 |
+| **Patient has coronary heart disease (Yes)** | -0.700      | 0.204      | 0.497      | (0.329, 0.736)      | 0.000638 |
+| **Number of cigarettes smoked per day**      | -0.012      | 0.004      | 0.988      | (0.981, 0.994)      | 0.000543 |
+| **Systolic blood pressure**                  | -0.007      | 0.004      | 0.992      | (0.985, 0.998)      | 0.025469 |
+
+#### [Interpretation for male patients model]{.underline}
+
+The table shown above is the result for the most parsimonious model I obtained from the data **for male patients**, the initial model included patient cholesterol level and BMI which were dropped due to non-significant p-values. The interpretation of the model coefficients are as follows with their corresponding confidence interval. Our reference category for the outcome variable **(diabetes type)** is Type A diabetes.
+
+**Age (years):** For every one-year increase in age, the odds of having Type B diabetes, relative to Type A diabetes, decreased by approximately 2.6% (Odds Ratio = 0.974, 95% Confidence Interval: 0.955 to 0.992).
+
+**Patient has coronary heart disease (Yes):** Male patients with coronary heart disease had approximately 50.3% lower odds of having Type B diabetes, compared to Type A diabetes (Odds Ratio = 0.497, 95% Confidence Interval: 0.329 to 0.736).
+
+**Number of cigarettes smoked per day:** With each additional cigarette smoked per day, the odds of having Type B diabetes, relative to Type A diabetes, decreased by approximately 1.2% (Odds Ratio = 0.988, 95% Confidence Interval: 0.981 to 0.994).
+
+**Systolic blood pressure:** For every one-unit increase in systolic blood pressure, the odds of having Type B diabetes, compared to Type A diabetes, decreased by approximately 0.8% (Odds Ratio = 0.992, 95% Confidence Interval: 0.985 to 0.998).
+
+### For female patients
+
+```{r, echo=FALSE}
+initial_female_model <- glm(data = diabetes_female, formula =  diabetes ~ age + chd + ncigs + sbp, family = "binomial")
+final_female_model <- glm(data = diabetes_female, formula =  diabetes ~ age + chd + ncigs, family = "binomial")
+```
+
+#### Table 2 - Logistic regression result for predicting diabetes type in female patients
+
+| Predictor                               | Coefficient | Std. Error | Odds Ratio | Confidence Interval | p-value |
+|------------|------------|------------|------------|------------|------------|
+| (Intercept)                             | 1.454       | 0.426      | \-         |                     | 0.0006  |
+| **Age**                                 | -0.027      | 0.010      | 0.973      | (0.956, 0.991)      | 0.0030  |
+| **Patient has coronary heart disease**  | -0.723      | 0.199      | 0.485      | (0.326, 0.713)      | 0.0003  |
+| **Number of cigarettes smoked per day** | -0.011      | 0.004      | 0.989      | (0.982, 0.996)      | 0.0024  |
+
+#### [Interpretation for female patients model]{.underline}
+
+The table shown above is the result for the most parsimonious model I obtained from the data **for female patients**, the initial model included whether or not the patient had coronary heart disease which was dropped due to non-significance. The interpretation of the model coefficients are as follows with their corresponding confidence interval. Our reference category for the outcome variable **(diabetes type)** is Type A diabetes.
+
+**Age:** For each one-year increase in age, the odds of having Type B diabetes, compared to Type A diabetes, decreased by approximately 2.7% (Odds Ratio = 0.973, 95% Confidence Interval: 0.956 to 0.991).
+
+**Patient has coronary heart disease:** Male patients with coronary heart disease exhibited approximately 51.5% lower odds of having Type B diabetes compared to Type A diabetes (Odds Ratio = 0.485, 95% Confidence Interval: 0.326 to 0.713).
+
+**Number of cigarettes smoked per day:** With each additional cigarette smoked per day, the odds of having Type B diabetes, relative to Type A diabetes, decreased by approximately 1.1% (Odds Ratio = 0.989, 95% Confidence Interval: 0.982 to 0.996).
+
+## 2C - Assessment of model fit
+
+### Fit of model for predicting diabetes types (MALE PATIENTS)
+
+### Fit of model for predicting diabetes types (FEMALE PATIENTS)
+
+# Appendix
+
+## Exploratory analysis for predictor selection (Male Patients)
+
+Here I explore which predictors are worth entering in the model by visualising if there is a noticeable difference between both diabetic groups for all the variables in our data. We can see already that there is not much difference in the cholesterol level and BMI of both diabetic groups of male patients. This is also true for whether or not one is a smoker, however it does appear to matter how many cigarette the patient smokes per day.
+
+```{r, echo = F}
+ggplot(diabetes_male, aes(x = age, fill = diabetes)) +
+     geom_density(alpha = 0.5) +
+     scale_fill_discrete(name = "Diabetes") +
+  labs(x = "Age", y= "Density", title = "Age and Diabetes")
+
+ggplot(diabetes_male, aes(x = sbp, fill = diabetes)) +
+     geom_density(alpha = 0.5) +
+     scale_fill_discrete(name = "Diabetes") +
+  labs(x = "Systolic Blood Pressure", y= "Density", title = "SBP and Diabetes")
+
+ggplot(diabetes_male, aes(x = bmi, fill = diabetes)) +
+     geom_density(alpha = 0.5) +
+     scale_fill_discrete(name = "Diabetes") +
+  labs(x = "Patient BMI (kg/m2)", y= "Density", title = "BMI and Diabetes")
+
+ggplot(diabetes_male, aes(x = chd, fill = diabetes)) +
+  geom_bar(position = "fill") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "Does patient have coronary heart disease?", y = "Proportion of diabetes type", title = "Coronary heart disease and diabetes")
+
+ggplot(diabetes_male, aes(x = chol, fill = diabetes)) +
+     geom_density(alpha = 0.5) +
+     scale_fill_discrete(name = "Diabetes") +
+  labs(x = "Patient cholesterol level (mg/100ml)", y= "Density", title = "Cholesterol level and Diabetes")
+
+ggplot(diabetes_male, aes(x = ncigs, fill = diabetes)) +
+     geom_density(alpha = 0.5) +
+     scale_fill_discrete(name = "Diabetes") +
+  labs(x = "Number of cigarettes smoked per day", y= "Density", title = "Number of cigarettes smoked and Diabetes")
+
+ggplot(diabetes_male, aes(x = smoke, fill = diabetes)) +
+  geom_bar(position = "fill") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "Does the patient smoke?", y = "Proportion of diabetes type", title = "Smoking and diabetes")
+
+```
+
+## Exploratory analysis for predictor selection (Female Patients)
+
+Here I explore which predictors are worth entering in the model by visualising if there is a noticeable difference between both diabetic groups for all the variables in our data. We can see already that there is not much difference in the cholesterol level and BMI of both diabetic groups of female patients.
+
+```{r, echo = F}
+
+
+ggplot(diabetes_male, aes(x = age, fill = diabetes)) +
+     geom_density(alpha = 0.5) +
+     scale_fill_discrete(name = "Diabetes") +
+  labs(x = "Age", y= "Density", title = "Age and Diabetes")
+
+ggplot(diabetes_male, aes(x = sbp, fill = diabetes)) +
+     geom_density(alpha = 0.5) +
+     scale_fill_discrete(name = "Diabetes") +
+  labs(x = "Systolic Blood Pressure", y= "Density", title = "Systolic blood pressure and Diabetes")
+
+ggplot(diabetes_male, aes(x = bmi, fill = diabetes)) +
+     geom_density(alpha = 0.5) +
+     scale_fill_discrete(name = "Diabetes") +
+  labs(x = "Patient BMI (kg/m2)", y= "Density", title = "BMI and Diabetes")
+
+ggplot(diabetes_male, aes(x = chd, fill = diabetes)) +
+  geom_bar(position = "fill") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "Does patient have coronary heart disease?", y = "Proportion of diabetes type", title = "Coronary heart disease and diabetes")
+
+ggplot(diabetes_male, aes(x = chol, fill = diabetes)) +
+     geom_density(alpha = 0.5) +
+     scale_fill_discrete(name = "Diabetes") +
+  labs(x = "Patient cholesterol level (mg/100ml)", y= "Density", title = "Cholesterol level and Diabetes")
+
+ggplot(diabetes_male, aes(x = ncigs, fill = diabetes)) +
+     geom_density(alpha = 0.5) +
+     scale_fill_discrete(name = "Diabetes") +
+  labs(x = "Number of cigarettes smoked per day", y= "Density", title = "Number of cigarettes smoked and Diabetes")
+
+ggplot(diabetes_male, aes(x = smoke, fill = diabetes)) +
+  geom_bar(position = "fill") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(x = "Does the patient smoke?", y = "Proportion of diabetes type", title = "Smoking and diabetes")
+
+```
+
+# Methodology
+
+1.  I used density plots and stacked bar charts to visualize which variables are likely to be useful predictors of patient diabetes type for each gender type. Thereafter I entered the selected variables into the regression model (6 for males), varied their position in the model to see if any changes are observed regarding the significance of the predictor or its coefficient. After this, I removed the non-significant predictors from the model at 5% level of significance to establish a parsimonious model.
+2.  I used systolic blood pressure and dropped diastolic blood pressure as they are both highly correlated (r = 0.77) to avoid multicollinearity.
